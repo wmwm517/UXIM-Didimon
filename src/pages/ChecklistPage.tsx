@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Plus, X, Bell } from 'lucide-react'
+import { Plus, X, Bell, ChevronLeft, ChevronRight } from 'lucide-react'
 import BottomNav from '../components/common/BottomNav'
 import pet1 from '../assets/pet1.png'
 import { useTodoStore } from '../store/todoStore'
@@ -20,10 +20,26 @@ function getWeekDates(from: Date): Date[] {
   })
 }
 
+function calcWeekOffset(today: Date, target: Date): number {
+  const getMonday = (d: Date) => {
+    const m = new Date(d)
+    const day = m.getDay()
+    m.setDate(m.getDate() + (day === 0 ? -6 : 1 - day))
+    m.setHours(0, 0, 0, 0)
+    return m
+  }
+  const diffMs = getMonday(target).getTime() - getMonday(today).getTime()
+  return Math.round(diffMs / (7 * 24 * 60 * 60 * 1000))
+}
+
 const DAY_LABELS = ['월', '화', '수', '목', '금', '토', '일']
+const MONTH_KR = ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월']
 
 function toDateStr(d: Date) {
-  return d.toISOString().split('T')[0]
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
 interface AddForm {
@@ -49,12 +65,24 @@ export default function ChecklistPage() {
   const [selectedDate, setSelectedDate] = useState(toDateStr(today))
   const [filterStatus, setFilterStatus] = useState<TodoStatus | 'all'>('all')
   const [showAdd, setShowAdd] = useState(false)
-  const [form, setForm] = useState<AddForm>({ ...defaultForm, dueDate: selectedDate })
+  const [form, setForm] = useState<AddForm>({ ...defaultForm, dueDate: toDateStr(today) })
 
-  const weekDates = getWeekDates(today)
+  const [weekOffset, setWeekOffset] = useState(0)
+  const [weekTransitioning, setWeekTransitioning] = useState(false)
+  const [slideDir, setSlideDir] = useState<1 | -1>(1)
+
+  const [showMonthPicker, setShowMonthPicker] = useState(false)
+  const [pickerYear, setPickerYear] = useState(today.getFullYear())
+  const [pickerMonth, setPickerMonth] = useState(today.getMonth())
+
   const todayStr = toDateStr(today)
 
-  // Todos for selected date
+  const baseDate = new Date(today)
+  baseDate.setDate(today.getDate() + weekOffset * 7)
+  const weekDates = getWeekDates(baseDate)
+  const displayYear = weekDates[0].getFullYear()
+  const displayMonth = weekDates[0].getMonth() + 1
+
   const dayTodos = todos.filter((t) => t.dueDate === selectedDate)
   const filtered = filterStatus === 'all'
     ? dayTodos
@@ -63,9 +91,17 @@ export default function ChecklistPage() {
   const doneCount = dayTodos.filter((t) => t.status === 'done').length
   const progressPct = dayTodos.length > 0 ? Math.round((doneCount / dayTodos.length) * 100) : 0
 
-  // Dots per day (has todos?)
-  const hasTodoOnDate = (dateStr: string) =>
-    todos.some((t) => t.dueDate === dateStr)
+  const hasTodoOnDate = (dateStr: string) => todos.some((t) => t.dueDate === dateStr)
+
+  const navigateWeek = (dir: 1 | -1) => {
+    if (weekTransitioning) return
+    setSlideDir(dir)
+    setWeekTransitioning(true)
+    setTimeout(() => {
+      setWeekOffset((prev) => prev + dir)
+      setWeekTransitioning(false)
+    }, 180)
+  }
 
   const handleAdd = () => {
     if (!form.content.trim()) return
@@ -79,6 +115,25 @@ export default function ChecklistPage() {
     })
     setForm({ ...defaultForm, dueDate: selectedDate })
     setShowAdd(false)
+  }
+
+  const handlePickerDateSelect = (year: number, month: number, day: number) => {
+    const target = new Date(year, month, day)
+    const ds = toDateStr(target)
+    setSelectedDate(ds)
+    setForm((f) => ({ ...f, dueDate: ds }))
+    setWeekOffset(calcWeekOffset(today, target))
+    setShowMonthPicker(false)
+  }
+
+  const getPickerDays = () => {
+    const firstDay = new Date(pickerYear, pickerMonth, 1)
+    const lastDate = new Date(pickerYear, pickerMonth + 1, 0).getDate()
+    const firstDow = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1
+    const cells: (Date | null)[] = Array(firstDow).fill(null)
+    for (let d = 1; d <= lastDate; d++) cells.push(new Date(pickerYear, pickerMonth, d))
+    while (cells.length % 7 !== 0) cells.push(null)
+    return cells
   }
 
   const statusColors: Record<TodoStatus, string> = {
@@ -97,44 +152,81 @@ export default function ChecklistPage() {
   return (
     <div className="min-h-screen flex flex-col bg-bg-page pb-20">
       {/* Week calendar */}
-      <div className="bg-white border-b border-border-light px-4 pt-4 pb-3 sticky top-0 z-30">
+      <div className="bg-white border-b border-border-light px-4 pt-6 pb-3 sticky top-0 z-30">
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-base font-bold text-text-basic">할일</h1>
-          <span className="text-xs text-text-subtle">
-            {today.getFullYear()}년 {today.getMonth() + 1}월
-          </span>
+          <button
+            onClick={() => {
+              setPickerYear(displayYear)
+              setPickerMonth(displayMonth - 1)
+              setShowMonthPicker(true)
+            }}
+            className="text-xs font-bold text-primary cursor-pointer hover:opacity-70 transition-opacity"
+          >
+            {displayYear}년 {displayMonth}월
+          </button>
         </div>
 
-        <div className="grid grid-cols-7 gap-1">
-          {weekDates.map((date, idx) => {
-            const ds = toDateStr(date)
-            const isSelected = ds === selectedDate
-            const isToday = ds === todayStr
-            const hasDot = hasTodoOnDate(ds)
-            return (
-              <button
-                key={ds}
-                onClick={() => { setSelectedDate(ds); setForm((f) => ({ ...f, dueDate: ds })) }}
-                className="flex flex-col items-center gap-1 touch-manipulation py-1"
-              >
-                <span className={`text-[10px] font-medium ${
-                  idx === 5 ? 'text-blue-500' : idx === 6 ? 'text-danger' : 'text-text-subtle'
-                }`}>
-                  {DAY_LABELS[idx]}
-                </span>
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-colors ${
-                  isSelected
-                    ? 'bg-primary text-white'
-                    : isToday
-                    ? 'bg-primary-light text-primary'
-                    : 'text-text-basic'
-                }`}>
-                  {date.getDate()}
-                </div>
-                <div className={`w-1.5 h-1.5 rounded-full ${hasDot ? 'bg-primary' : 'bg-transparent'}`} />
-              </button>
-            )
-          })}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => navigateWeek(-1)}
+            className="p-1 flex-shrink-0 text-primary hover:opacity-70 transition-opacity touch-manipulation"
+            aria-label="이전 주"
+          >
+            <ChevronLeft size={18} />
+          </button>
+
+          <div
+            className="flex-1 grid grid-cols-7 gap-1"
+            style={{
+              transition: 'opacity 0.18s ease, transform 0.18s ease',
+              opacity: weekTransitioning ? 0 : 1,
+              transform: weekTransitioning
+                ? `translateX(${slideDir > 0 ? '-10px' : '10px'})`
+                : 'translateX(0)',
+            }}
+          >
+            {weekDates.map((date, idx) => {
+              const ds = toDateStr(date)
+              const isSelected = ds === selectedDate
+              const isToday = ds === todayStr
+              const hasDot = hasTodoOnDate(ds)
+              return (
+                <button
+                  key={ds}
+                  onClick={() => {
+                    setSelectedDate(ds)
+                    setForm((f) => ({ ...f, dueDate: ds }))
+                  }}
+                  className="flex flex-col items-center gap-1 touch-manipulation py-1"
+                >
+                  <span className={`text-[10px] font-medium ${
+                    idx === 5 ? 'text-blue-500' : idx === 6 ? 'text-danger' : 'text-text-subtle'
+                  }`}>
+                    {DAY_LABELS[idx]}
+                  </span>
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-colors ${
+                    isSelected
+                      ? 'bg-primary text-white'
+                      : isToday
+                      ? 'bg-primary-light text-primary'
+                      : 'text-text-basic'
+                  }`}>
+                    {date.getDate()}
+                  </div>
+                  <div className={`w-1.5 h-1.5 rounded-full ${hasDot ? 'bg-primary' : 'bg-transparent'}`} />
+                </button>
+              )
+            })}
+          </div>
+
+          <button
+            onClick={() => navigateWeek(1)}
+            className="p-1 flex-shrink-0 text-primary hover:opacity-70 transition-opacity touch-manipulation"
+            aria-label="다음 주"
+          >
+            <ChevronRight size={18} />
+          </button>
         </div>
       </div>
 
@@ -205,6 +297,7 @@ export default function ChecklistPage() {
                     </div>
                   </button>
 
+                  {/* Content */}
                   <div className="flex-1 min-w-0">
                     <p className={`text-sm font-medium leading-snug mb-1 ${
                       todo.status === 'done' ? 'line-through text-text-disabled' : 'text-text-basic'
@@ -212,9 +305,7 @@ export default function ChecklistPage() {
                       {todo.content}
                     </p>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span
-                        className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${statusColors[todo.status]}`}
-                      >
+                      <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${statusColors[todo.status]}`}>
                         {STATUS_LABELS[todo.status]}
                       </span>
                       <span className="text-[10px] text-text-disabled">
@@ -334,6 +425,87 @@ export default function ChecklistPage() {
               <button onClick={handleAdd} disabled={!form.content.trim()} className="btn-primary">
                 추가하기
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Month Picker popup */}
+      {showMonthPicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowMonthPicker(false)} />
+          <div className="relative w-full max-w-[340px] bg-white rounded-2xl px-4 pt-4 pb-5 shadow-xl animate-slide-up">
+            {/* Picker header */}
+            <div className="flex items-center justify-between mb-3">
+              <button
+                onClick={() => {
+                  if (pickerMonth === 0) { setPickerYear((y) => y - 1); setPickerMonth(11) }
+                  else setPickerMonth((m) => m - 1)
+                }}
+                className="p-1.5 text-primary hover:opacity-70 transition-opacity touch-manipulation"
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <span className="text-sm font-bold text-text-basic">
+                {pickerYear}년 {MONTH_KR[pickerMonth]}
+              </span>
+              <button
+                onClick={() => {
+                  if (pickerMonth === 11) { setPickerYear((y) => y + 1); setPickerMonth(0) }
+                  else setPickerMonth((m) => m + 1)
+                }}
+                className="p-1.5 text-primary hover:opacity-70 transition-opacity touch-manipulation"
+              >
+                <ChevronRight size={18} />
+              </button>
+            </div>
+
+            {/* Day-of-week header */}
+            <div className="grid grid-cols-7 mb-1">
+              {DAY_LABELS.map((label, idx) => (
+                <div
+                  key={label}
+                  className={`text-center text-[10px] font-medium py-1 ${
+                    idx === 5 ? 'text-blue-500' : idx === 6 ? 'text-danger' : 'text-text-subtle'
+                  }`}
+                >
+                  {label}
+                </div>
+              ))}
+            </div>
+
+            {/* Calendar grid */}
+            <div className="grid grid-cols-7 gap-y-0.5">
+              {getPickerDays().map((date, i) => {
+                if (!date) return <div key={`empty-${i}`} />
+                const ds = toDateStr(date)
+                const isSelected = ds === selectedDate
+                const isToday = ds === todayStr
+                const hasDot = hasTodoOnDate(ds)
+                const dow = date.getDay() === 0 ? 6 : date.getDay() - 1
+                return (
+                  <button
+                    key={ds}
+                    onClick={() => handlePickerDateSelect(date.getFullYear(), date.getMonth(), date.getDate())}
+                    className="flex flex-col items-center py-0.5 touch-manipulation"
+                  >
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium transition-colors ${
+                      isSelected
+                        ? 'bg-primary text-white'
+                        : isToday
+                        ? 'bg-primary-light text-primary font-bold'
+                        : dow === 5
+                        ? 'text-blue-500'
+                        : dow === 6
+                        ? 'text-danger'
+                        : 'text-text-basic'
+                    }`}>
+                      {date.getDate()}
+                    </div>
+                    <div className={`w-1 h-1 rounded-full mt-0.5 ${hasDot ? 'bg-primary' : 'bg-transparent'}`} />
+                  </button>
+                )
+              })}
             </div>
           </div>
         </div>
