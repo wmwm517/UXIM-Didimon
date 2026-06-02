@@ -385,16 +385,7 @@ app.post("/api/ai/chat", async (req, res) => {
       const genMsg = genErr.message ?? "";
       console.warn("[ai/chat] Gemini 생성 실패 →  문서 요약 폴백:", genMsg.slice(0, 80));
 
-      // Gemini API 사용 불가 시 검색된 문서를 직접 요약해서 반환
-      if (
-        genMsg.includes("SERVICE_DISABLED") ||
-        genMsg.includes("API_KEY_SERVICE_BLOCKED") ||
-        genMsg.includes("403")
-      ) {
-        return res.status(403).json({ error: "GEMINI_API_DISABLED" });
-      }
-
-      // 기타 Gemini 오류 → 문서 내용 직접 전달
+      // Gemini 오류 시 검색된 문서를 직접 요약해서 반환
       const fallback = docs
         .slice(0, 3)
         .map((d) => {
